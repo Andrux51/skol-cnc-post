@@ -138,7 +138,7 @@ propertyDefinitions = {
 var coolants = {
   flood: {on: 8},
   mist: {},
-  throughTool: {on: 7, off: 89},
+  throughTool: {on: 7, off: 9},
   air: {},
   airThroughTool: {},
   suction: {},
