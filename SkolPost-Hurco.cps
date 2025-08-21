@@ -1,5 +1,5 @@
 /**
-  Copyright (C) 2019 Andy Martin
+  Copyright (C) 2019-2025 Andy Martin
   All rights reserved.
 
   FANUC CNC firmware post processor configuration.
@@ -12,6 +12,7 @@
   Revision History:
    - 2019-05-15: Initial version
    - 2025-08-21: Format with Prettier
+   - 2025-08-21: Add support for Manual NC Passthrough
 */
 
 var gcodeFlavor = "fanuc";
@@ -19,7 +20,7 @@ var gcodeFlavor = "fanuc";
 description = "Skol Ironworks Custom Post";
 vendor = "Fanuc";
 vendorUrl = "http://www.fanuc.com";
-legal = "Copyright (C) 2019 Andy Martin";
+legal = "Copyright (C) 2019-2025 Andy Martin";
 certificationLevel = 2;
 minimumRevision = 1;
 
@@ -45,14 +46,14 @@ properties = {
   allow3DArcs: false, // specifies that 3D circular arcs are allowed
   forceIJK: false, // force output of IJK for G2/G3 when not using R word
   o8: false, // specifies 8-digit program number
-  optionalStop: true, // optional stop
+  optionalStop: false, // optional stop
   preloadTool: true, // preloads next tool on tool change if any
   preloadFirstTool: true,
   separateWordsWithSpace: true, // specifies that the words should be separated with a white space
   sequenceNumberIncrement: 5, // increment for sequence numbers
   sequenceNumberStart: 10, // first sequence number
   showNotes: false, // specifies that operation notes should be output
-  showSequenceNumbers: true, // show sequence numbers
+  showSequenceNumbers: false, // show sequence numbers
   useG28: true, // specifies that G28 should be used instead of G53
   useParametricFeed: false, // specifies that feed should be output using Q values
   usePitchForTapping: false, // enable to use pitch instead of feed for the F-word for canned tapping cycles - note that your CNC control must be setup for pitch mode!
@@ -62,7 +63,7 @@ properties = {
   useSubroutineCycles: false, // generates subroutines for cycle operations on same holes
   useSubroutinePatterns: false, // generates subroutines for patterned operation
   useSmoothing: false, // specifies if smoothing should be used or not
-  writeMachine: true, // write machine
+  writeMachine: false, // write machine
   writeTools: true, // writes the tools
   // added by Andy
   endPositionX: 0,
@@ -573,6 +574,9 @@ function onClose() {
   // -AM 05152019
   writeRetract(Y); // return to home Josh
 
+  // Process Manual NC commands
+  executeManualNC();
+
   // M02 followed by M30 should be enough to make sure the machine stops good and dead
   // writeBlock(mCode(MCODES.END_OF_PROGRAM))
   writeBlock(mCode(MCODES.PROGRAM_END)); // stop program, spindle stop, coolant off
@@ -800,6 +804,9 @@ function onSection() {
 
   // set coolant after we have positioned at Z
   // setCoolant(tool.coolant);
+
+  // Process Pass Through commands
+  executeManualNC();
 
   if (properties.useSmoothing) {
     if (
@@ -1449,12 +1456,6 @@ function isProbeOperation() {
 }
 
 var probeOutputWorkOffset = 1;
-
-function onParameter(name, value) {
-  if (name == "probe-output-work-offset") {
-    probeOutputWorkOffset = value > 0 ? value : 1;
-  }
-}
 
 /** Returns true if the spatial vectors are significantly different. */
 function areSpatialVectorsDifferent(_vector1, _vector2) {
@@ -2611,6 +2612,19 @@ function onCycleEnd() {
   }
 }
 
+function onPassThrough(text) {
+  var commands = String(text).split(",");
+  for (text in commands) {
+    writeBlock(commands[text]);
+  }
+}
+
+function onParameter(name, value) {
+  if (name == "probe-output-work-offset") {
+    probeOutputWorkOffset = value > 0 ? value : 1;
+  }
+}
+
 var pendingRadiusCompensation = -1;
 
 function onRadiusCompensation() {
@@ -3074,6 +3088,36 @@ function getCoolantCodes(coolant) {
     return multipleCoolantBlocks; // return the single formatted coolant value
   }
   return undefined;
+}
+
+/**
+ Buffer Manual NC commands for processing later
+*/
+var bufferPassThrough = false; // enable to output the Pass Through commands until after ending the previous section
+var manualNC = [];
+function onManualNC(command, value) {
+  if (command == COMMAND_PASS_THROUGH && bufferPassThrough) {
+    manualNC.push({ command: command, value: value });
+  } else {
+    expandManualNC(command, value);
+  }
+}
+
+/**
+ Processes the Manual NC commands
+ Pass the desired command to process or leave argument list blank to process all buffered commands
+*/
+function executeManualNC(command) {
+  for (var i = 0; i < manualNC.length; ++i) {
+    if (!command || command == manualNC[i].command) {
+      expandManualNC(manualNC[i].command, manualNC[i].value);
+    }
+  }
+  for (var i = manualNC.length - 1; i >= 0; --i) {
+    if (!command || command == manualNC[i].command) {
+      manualNC.splice(i, 1);
+    }
+  }
 }
 
 var mapCommand = {
